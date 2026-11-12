@@ -1,11 +1,11 @@
 {
   "name": "ai-agent-helper",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
-  "description": "Discover locally installed AI agent CLIs.",
+  "description": "Discover AI agent CLIs, manage TOML configuration, and install or update Codex through a proxy.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tool-helper/ai-agent-helper.git"
@@ -53,10 +53,16 @@
     "typescript"
   ],
   "dependencies": {
+    "cross-spawn": "^7.0.6",
+    "semver": "^7.8.6",
+    "smol-toml": "^1.9.1",
+    "toml-eslint-parser": "^0.10.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/node": "^22.20.5",
+    "@types/semver": "^7.8.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

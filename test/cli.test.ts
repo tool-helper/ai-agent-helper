@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { agentListSchema } from "../src/schema.js";
@@ -57,4 +60,36 @@ test("invalid commands and flags fail without contaminating stdout", () => {
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /agent-helper:/);
   }
+});
+
+test("config CLI edits key=value batches in an isolated home, preserves comments and redacts secrets", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "agent-helper-cli-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["PATH", "HOME", "USERPROFILE"].includes(key.toUpperCase())));
+  Object.assign(env, { PATH: "", HOME: home, USERPROFILE: home });
+  const isolated = (...args: string[]) => spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", ...args], { cwd: root, env, encoding: "utf8", timeout: 15_000 });
+  const path = join(home, ".ai-agent-helper", "config.toml");
+  assert.equal(isolated("config").status, 0);
+  await assert.rejects(stat(path), { code: "ENOENT" });
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(path, "# keep this comment\nversion = 1\n");
+  const set = isolated("config", "set", "proxy=http://user:p=SECRET@localhost:7890", "no_proxy=localhost,127.0.0.1");
+  assert.equal(set.status, 0, set.stderr);
+  assert.ok(!set.stdout.includes("SECRET"));
+  const view = isolated("config");
+  assert.equal(view.status, 0, view.stderr);
+  assert.ok(view.stdout.includes("REDACTED"));
+  assert.ok(!view.stdout.includes("SECRET"));
+  const saved = await readFile(path, "utf8");
+  assert.ok(saved.includes("# keep this comment"));
+  const invalid = isolated("config", "set", "proxy=http://new", "version=2");
+  assert.equal(invalid.status, 1);
+  assert.equal(await readFile(path, "utf8"), saved);
+  assert.equal(isolated("config", "unset", "proxy").status, 0);
+  assert.doesNotMatch(isolated("config").stdout, /^proxy\s*=/m);
+  for (const args of [["update", "--self", "--agent", "codex"], ["update", "--agent", "gemini"], ["install", "gemini"], ["update", "--all"], ["list", "--proxy", "http://localhost"]]) {
+    assert.equal(isolated(...args).status, 1, args.join(" "));
+  }
+  assert.equal(isolated("update", "--all-agents").status, 0);
+  for (const command of ["config", "install", "update"]) assert.equal(isolated(command, "--help").status, 0);
 });

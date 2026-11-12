@@ -1,6 +1,8 @@
 # ai-agent-helper
 
-使用 TypeScript 和 Zod 开发的 AI agent CLI 管理工具。首版 `0.1.0` 仅实现列出本机 PATH 中可找到的 agent，不安装、更新或启动 agent。
+使用 TypeScript 和 Zod 开发的 AI agent CLI 管理工具。检测本机 PATH 中的 agent，管理 TOML 配置，并通过默认代理安装或更新 Codex，也支持更新工具自身。
+
+从 `0.2.0` 起提供 `config`、`install`、`update` 命令；安装和更新 agent 目前先支持 Codex。
 
 需要 Node.js **22.13 或更高版本**。
 
@@ -34,6 +36,16 @@ agent-helper list --help
 agent-helper list --all
 agent-helper list --json
 agent-helper list --all --json
+agent-helper config
+agent-helper config set proxy=http://127.0.0.1:7890
+agent-helper config set no_proxy=localhost,127.0.0.1,::1
+agent-helper config unset proxy
+agent-helper install codex --dry-run
+agent-helper install codex
+agent-helper update --dry-run
+agent-helper update --self
+agent-helper update --agent codex
+agent-helper update --all-agents
 ```
 
 - 无参数时显示帮助。
@@ -85,11 +97,34 @@ agentListSchema.parse(all);
 
 包提供 ESM 导出和类型声明。Zod 校验 CLI 选项及检测结果，并约束已检测到条目必须包含路径、未检测到条目的路径必须为 `null`。
 
-## 配置功能设计
+## 配置与代理
 
-配置采用 `~/.ai-agent-helper/config.toml`，以 TOML 保存注释和配置分组。当前已提供 `configSchema`、`configKeySchema`、`proxyUrlSchema` 及对应 TypeScript 类型；配置文件读写、`config` 命令和代理安装功能尚未实现。
+配置文件为 `~/.ai-agent-helper/config.toml`，采用 TOML。`config` 查看配置与默认值；`config set key=value` 可以一次设置多项，只按首个等号分割。修改保留注释、字段顺序和换行风格，写入前校验整份配置，失败不覆盖文件。
 
-设计及命令约定见 [配置功能设计](docs/configuration.md)，带注释的文件示例见 [config.toml](examples/config.toml)。初版模型包含配置格式版本 `version`、默认安装代理 `proxy` 和绕过规则 `no_proxy`。
+```toml
+version = 1
+proxy = "http://127.0.0.1:7890"
+no_proxy = ["localhost", "127.0.0.1", "::1"]
+```
+
+可写项为 `proxy` 和 `no_proxy`；版本字段由工具维护。CLI 中的 `no_proxy` 使用逗号分隔，保存后为 TOML 数组。删除字段使用 `config unset`，空字符串不会当成删除。`config` 展示代理时隐藏账号和密码；文件仍保存实际配置值。
+
+代理优先级为 `--proxy` → 配置文件的 `proxy` → npm 已有配置。代理及绕过规则只注入安装/更新子进程，不改动系统代理或全局 npm 配置。支持 HTTP/HTTPS 代理地址，绕过规则的匹配语义由 npm 决定。
+
+详细约定见 [配置功能文档](docs/configuration.md)，带注释的示例见 [config.toml](examples/config.toml)。也提供配置模型、`readConfig`、`writeConfig`、`parseAssignments` 等 TypeScript API。
+
+## 安装与更新
+
+- `install codex` 安装 npm 包 `@openai/codex`；已安装时跳过，`--reinstall` 可重装普通 npm 全局安装。
+- `update` 默认等同于 `update --self`，更新 npm 包 `ai-agent-helper`。
+- `update --agent codex` 只更新 Codex；`update --all-agents` 只更新 PATH 中已检测到且当前支持更新的 agent，目前为 Codex。
+- `--self`、`--agent`、`--all-agents` 互斥。其他 agent 保留检测功能，暂不支持安装/更新。
+- 安装/更新通过 npm 官方 registry 查询 `latest`，然后安装查询到的确切版本，保留当前 npm 的全局 prefix；更新不会自动降级。
+- 仅管理当前 npm 全局目录中的普通安装。遇到源码、`npm link`、临时 `npx`、其他 prefix 或其他渠道的安装时，实际更新会报错并提示原安装方式，防止写入另一个位置。
+- `--dry-run` 仅检查本地 npm 目录、已有版本和安装来源，展示计划；不联网查询版本，不执行安装。对于不适用的安装来源会展示原因。
+- 安装完成后验证目标目录内的包版本和命令入口，不启动 Codex、不测试登录。首次安装如果命令目录尚未在 PATH 中，会提示检查 PATH 并重新打开终端。
+
+Codex 的 npm 安装/更新方式见 [OpenAI 官方 CLI 文档](https://developers.openai.com/codex/cli#npm)。
 
 ## 开发与扩展
 
@@ -101,4 +136,6 @@ npm pack
 
 每种 agent 在 `src/agents/` 中独立实现 `AgentProvider.detect()`，在 `src/agents/index.ts` 注册。当前共用 `src/detection/find-executable.ts` 的 PATH 查找能力；以后可在各自模块内添加专用安装路径或其他识别逻辑，不必修改 CLI。
 
-`src/list-agents.ts` 负责汇总和 Zod 校验，`src/cli.ts` 负责参数解析与展示。测试使用临时目录和伪可执行入口，不启动本机 agent；包含 CLI 帮助、错误参数、JSON、PATH 优先级、Windows PATHEXT、POSIX 执行权限等用例。平台专属用例只在对应平台执行。
+`src/list-agents.ts` 负责检测汇总，`src/config/` 负责配置，`src/installation/` 负责 npm 安装与更新，`src/proxy/` 负责子进程代理环境，`src/cli.ts` 负责命令分发。Codex 的 npm 包及入口信息定义在独立 agent 模块中。
+
+测试覆盖 CLI、配置注释保留、原子写入、更新目标互斥、安装来源检查及失败验证。代理集成测试使用真实 npm、本地 HTTP 测试代理和隔离全局目录中的测试包，验证元数据及安装包经过代理，并完成安装和升级；不安装真实 Codex。平台专属用例只在对应平台执行。

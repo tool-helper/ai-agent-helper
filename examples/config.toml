@@ -1,5 +1,5 @@
 # 保存到 ~/.ai-agent-helper/config.toml。
-# 本示例属于配置模型设计；当前 CLI 尚未提供 config / install 命令。
+# 从 0.2.0 起提供 config / install / update 命令。
 
 # 配置文件格式版本，由 helper 管理。
 version = 1

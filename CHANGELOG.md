@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- 实现 `config`、`config set key=value`、`config unset`，使用用户级 TOML 文件，保留注释并校验整份配置。
+- 实现经默认代理安装/更新 npm Codex，支持临时代理、预览和重新安装。
+- 实现 `update` 默认更新工具自身，以及 `--self`、`--agent codex`、`--all-agents` 互斥目标。
+- 检查 npm 全局安装来源和 prefix，拒绝覆盖其他渠道或 `npm link` 安装。
+- 增加配置、安装执行及真实 npm 本地代理集成测试。
+
 ## 0.1.1
 
 - 定义 `~/.ai-agent-helper/config.toml` 的配置数据模型：`version`、`proxy`、`no_proxy`。

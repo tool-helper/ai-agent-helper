@@ -1,6 +1,6 @@
-# 配置功能设计
+# 配置功能
 
-状态：已定义 TypeScript / Zod 数据模型和 TOML 示例。文件读写、`config` 命令、`install` 命令及代理注入尚未实现；本文件中的命令是拟实现的接口。
+从 `0.2.0` 起提供 TOML 配置读写、`config` 命令、Codex 安装/更新及工具自身更新。
 
 ## 文件位置与格式
 
@@ -47,10 +47,13 @@ const defaults = configSchema.parse({});
 agent-helper config
 
 # 设置默认安装代理
-agent-helper config set proxy http://127.0.0.1:7890
+agent-helper config set proxy=http://127.0.0.1:7890
 
-# 数组通过多个参数设置，每个参数对应一条规则
-agent-helper config set no_proxy localhost 127.0.0.1 ::1
+# 数组在命令中用逗号分隔，文件中保存为 TOML 数组
+agent-helper config set no_proxy=localhost,127.0.0.1,::1
+
+# 同时设置多个字段，全部验证通过后才写入
+agent-helper config set proxy=http://127.0.0.1:7890 no_proxy=localhost,127.0.0.1
 
 # 删除代理配置，恢复继承安装工具原有配置
 agent-helper config unset proxy
@@ -59,7 +62,7 @@ agent-helper config unset proxy
 agent-helper config unset no_proxy
 ```
 
-可写配置键由 `configKeySchema` 限定为 `proxy` 和 `no_proxy`。`set proxy` 要求一个字符串值；`set no_proxy` 要求至少一个条目，需要恢复默认空数组时使用 `unset`。写入前应校验修改后的整份配置，而不只是当前字段。帮助文本应列出允许的键、值类型、默认行为、配置路径和示例。
+可写配置键由 `configKeySchema` 限定为 `proxy` 和 `no_proxy`。每个赋值只按第一个等号拆分；代理密码中的等号会保留。重复键、未知键、空值及无效类型会报错。`no_proxy` 要求至少一个条目，需要恢复默认空数组时使用 `unset`。写入前校验修改后的整份配置，而不只是当前字段。`config --help` 列出配置路径、键类型和示例。
 
 `config` 展示配置文件中的值及内置默认值，不将安装工具或当前环境中的代理误标成已保存配置。代理认证信息必须脱敏，包括用户名与密码；`--json` 等将来新增的展示方式也遵循此规则。
 
@@ -73,16 +76,17 @@ agent-helper config unset no_proxy
 
 前两项命中时，安装适配器为本次子进程设置对应代理参数及环境变量，不修改系统代理或安装工具的全局配置。此时，非空 `no_proxy` 明确替换工具继承的绕过规则；空数组不注入绕过规则，保留工具已有设置。代理都未显式指定时，不单独应用 helper 的 `no_proxy`。
 
-`no_proxy` 不宣称统一不同工具对域名、端口、通配符和 CIDR 的匹配语义。适配器必须验证或拒绝其不支持的规则；不能静默忽略并宣称代理已正确应用。首版 URL 模型仅支持 HTTP/HTTPS；其他协议应在安装器支持后再扩展。
+当前安装器仅支持 npm：`no_proxy` 转换为逗号分隔的 `NO_PROXY` / `no_proxy` 和 `npm_config_noproxy`，具体规则的匹配行为由 npm 决定。模型验证非空、无逗号的条目，不宣称各种工具对通配符或 CIDR 的语义一致。首版代理 URL 仅支持 HTTP/HTTPS。
 
 ## 读写要求
 
 - 文件不存在时返回内置默认值；只查看配置不会创建目录或文件。
 - 第一次 `set` 才创建目录与配置文件，写入 `version = 1`。
 - 文件存在但 TOML 语法或数据校验失败时，报告文件位置和字段错误，停止修改，不覆盖原文件。
-- 错误信息和展示结果不得输出包含认证信息的原始 URL。
-- `set` / `unset` 需要使用能保留注释和原有顺序的编辑方式；只解析后重新 stringify 整份文件不能满足要求。
-- 在同目录写入临时文件并原子替换，失败时保留原文件；写入前检查源文件是否变化，避免覆盖外部并发修改。
+- 错误信息和展示结果对代理 URL 中的账号与密码脱敏。文件保存真实 URL，初次创建使用当前用户私有权限（POSIX 为目录 0700、文件 0600；Windows 实际访问权限由系统 ACL 决定）。
+- `set` / `unset` 根据 TOML AST 的范围修改目标值，保留注释、字段顺序和换行风格；多行数组内的注释也保留。`config` 输出的是经过脱敏并补齐默认值的 TOML，不复刻原文件排版。
+- 使用独占 `.lock` 文件协调 helper 写入，在同目录写临时文件并原子替换；写入前检查原文是否变化。锁文件存在时停止操作；若进程异常退出留下锁，确认没有写入进程后可手工删除锁文件。外部编辑器不参与 helper 的锁，原文检查不能彻底消除所有外部写入竞态。
+- 配置文件为符号链接时允许读取，但拒绝通过 helper 修改，提示直接编辑目标文件。
 - 未知字段、未知版本的文件可以由用户手动维护，但当前版本拒绝修改，保留原文。
 
 文件格式版本与 npm 包版本分开维护。后续确有需求时，再为安装器参数或 agent 专属配置添加 TOML 分组及迁移规则。
