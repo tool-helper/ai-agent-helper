@@ -1,0 +1,60 @@
+{
+  "name": "ai-agent-helper",
+  "version": "0.1.0",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "description": "Discover locally installed AI agent CLIs.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tool-helper/ai-agent-helper.git"
+  },
+  "homepage": "https://github.com/tool-helper/ai-agent-helper#readme",
+  "bugs": {
+    "url": "https://github.com/tool-helper/ai-agent-helper/issues"
+  },
+  "type": "module",
+  "bin": {
+    "agent-helper": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "claude",
+    "codex",
+    "gemini",
+    "typescript"
+  ],
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
