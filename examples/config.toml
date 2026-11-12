@@ -1,0 +1,13 @@
+# 保存到 ~/.ai-agent-helper/config.toml。
+# 本示例属于配置模型设计；当前 CLI 尚未提供 config / install 命令。
+
+# 配置文件格式版本，由 helper 管理。
+version = 1
+
+# 安装 agent 时的默认 HTTP/HTTPS 代理。
+# 取消注释前请替换为自己的代理地址；省略时继承安装工具原有设置。
+# proxy = "http://127.0.0.1:7890"
+
+# 使用默认或临时代理时，交给各安装器处理的绕过规则。
+# 不需要绕过规则时可以省略此项。
+no_proxy = ["localhost", "127.0.0.1", "::1"]

@@ -1,6 +1,6 @@
 {
   "name": "ai-agent-helper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
@@ -28,7 +28,10 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "docs/configuration.md",
+    "examples/config.toml"
   ],
   "engines": {
     "node": ">=22.13.0"

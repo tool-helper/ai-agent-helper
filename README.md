@@ -85,6 +85,12 @@ agentListSchema.parse(all);
 
 包提供 ESM 导出和类型声明。Zod 校验 CLI 选项及检测结果，并约束已检测到条目必须包含路径、未检测到条目的路径必须为 `null`。
 
+## 配置功能设计
+
+配置采用 `~/.ai-agent-helper/config.toml`，以 TOML 保存注释和配置分组。当前已提供 `configSchema`、`configKeySchema`、`proxyUrlSchema` 及对应 TypeScript 类型；配置文件读写、`config` 命令和代理安装功能尚未实现。
+
+设计及命令约定见 [配置功能设计](docs/configuration.md)，带注释的文件示例见 [config.toml](examples/config.toml)。初版模型包含配置格式版本 `version`、默认安装代理 `proxy` 和绕过规则 `no_proxy`。
+
 ## 开发与扩展
 
 ```sh
