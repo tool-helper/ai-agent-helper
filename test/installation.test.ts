@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { managePackage, resolveUpdateTarget, type InstallRuntime, type ManageOptions } from "../src/installation/manage.js";
 import { installationEnvironment, redact } from "../src/proxy/environment.js";
+import { builtInAgents } from "../src/agents/index.js";
 
 test("default update target is self, explicit targets override the default and cannot conflict", () => {
   assert.deepEqual(resolveUpdateTarget({}), { kind: "self" });
   assert.deepEqual(resolveUpdateTarget({ self: true }), { kind: "self" });
   assert.deepEqual(resolveUpdateTarget({ agent: "codex" }), { kind: "agent", id: "codex" });
+  assert.deepEqual(resolveUpdateTarget({ agent: "dsh" }), { kind: "agent", id: "dsh" });
   assert.deepEqual(resolveUpdateTarget({ allAgents: true }), { kind: "all-agents" });
   assert.throws(() => resolveUpdateTarget({ self: true, agent: "codex" }));
   assert.throws(() => resolveUpdateTarget({ allAgents: true, agent: "codex" }));
@@ -36,13 +38,15 @@ test("proxy precedence replaces conflicting variables only in the child environm
 async function fixture(t: TestContext, target = "codex", current?: string) {
   const root = await mkdtemp(join(tmpdir(), "agent-helper-installer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const packageName = target === "self" ? "ai-agent-helper" : "@openai/codex";
+  const provider = builtInAgents.find((provider) => provider.definition.id === target);
+  const packageName = target === "self" ? "ai-agent-helper" : provider!.installer!.packageName;
+  const entryPoint = target === "self" ? "dist/cli.js" : provider!.installer!.entryPoint;
   const directory = join(root, "node_modules", ...packageName.split("/"));
   const calls: string[][] = [];
   async function install(version: string) {
-    await mkdir(join(directory, target === "self" ? "dist" : "bin"), { recursive: true });
+    await mkdir(dirname(join(directory, entryPoint)), { recursive: true });
     await writeFile(join(directory, "package.json"), JSON.stringify({ name: packageName, version }));
-    await writeFile(join(directory, target === "self" ? "dist/cli.js" : "bin/codex.js"), "");
+    await writeFile(join(directory, entryPoint), "");
   }
   if (current) await install(current);
   const runtime: InstallRuntime = {
@@ -52,7 +56,7 @@ async function fixture(t: TestContext, target = "codex", current?: string) {
       calls.push(args);
       if (args[0] === "root") return join(root, "node_modules");
       if (args[0] === "prefix") return root;
-      if (args[0] === "view") return '"2.0.0"';
+      if (args[0] === "view") return JSON.stringify({ version: "2.0.0", engines: { node: ">=22.13.0" } });
       if (args[0] === "install") { await install("2.0.0"); return ""; }
       throw new Error("unexpected npm call");
     },
@@ -152,4 +156,60 @@ test("a foreign executable in the same npm command directory is not treated as t
   runtime.context.env.PATH = bin;
   await assert.rejects(managePackage(options, runtime), /原安装方式/);
   assert.ok(!calls.some((args) => args[0] === "install"));
+});
+
+test("DSH installation and update use its scoped package and lib/bin.js entry", async (t) => {
+  const { calls, runtime, options } = await fixture(t, "dsh");
+  const installed = await managePackage({ ...options, action: "install" }, runtime);
+  assert.equal(installed.packageName, "@deepseek-ai/dsh");
+  assert.equal(installed.status, "installed");
+  assert.ok(calls.some((args) => args.includes("@deepseek-ai/dsh@2.0.0")));
+  assert.ok(calls.some((args) => args.includes("--engine-strict")));
+  const updated = await fixture(t, "dsh", "1.0.0");
+  assert.equal((await managePackage(updated.options, updated.runtime)).status, "updated");
+});
+
+test("Node requirements are checked before installing a newer DSH release", async (t) => {
+  const fixtureValue = await fixture(t, "dsh");
+  const run = fixtureValue.runtime.runNpm;
+  fixtureValue.runtime.nodeVersion = "22.13.0";
+  fixtureValue.runtime.runNpm = async (args) => args[0] === "view"
+    ? JSON.stringify({ version: "2.0.0", engines: { node: ">=24.9.0" } }) : run(args);
+  await assert.rejects(managePackage({ ...fixtureValue.options, action: "install" }, fixtureValue.runtime), /Node.js >=24.9.0/);
+  assert.ok(!fixtureValue.calls.some((args) => args[0] === "install"));
+});
+
+test("desktop-bundled DSH is detected but is never replaced by the npm CLI", async (t) => {
+  const { root, calls, runtime, options } = await fixture(t, "dsh");
+  const desktop = join(root, "DeepSeek Harness", "runtime", "cli", "bin");
+  await mkdir(desktop, { recursive: true });
+  const path = join(desktop, process.platform === "win32" ? "dsh.cmd" : "dsh");
+  await writeFile(path, "desktop test fixture");
+  if (process.platform !== "win32") await chmod(path, 0o755);
+  runtime.context.env.PATH = desktop;
+  await assert.rejects(managePackage(options, runtime), /原安装方式/);
+  const skipped = await managePackage({ ...options, action: "install" }, runtime);
+  assert.equal(skipped.status, "skipped");
+  assert.match(skipped.message, /原安装方式/);
+  await assert.rejects(managePackage({ ...options, action: "install", reinstall: true }, runtime), /原安装方式/);
+  assert.ok(!calls.some((args) => args[0] === "view" || args[0] === "install"));
+});
+
+test("saved proxy applies to Codex; DSH and self need an explicit override", async (t) => {
+  for (const target of ["codex", "dsh", "self"]) {
+    const { runtime, options } = await fixture(t, target, target === "self" ? "1.0.0" : undefined);
+    const config = { version: 1 as const, proxy: "http://saved:7890", no_proxy: [] };
+    const action = target === "self" ? "update" as const : "install" as const;
+    const result = await managePackage({ ...options, config, action, dryRun: true }, runtime);
+    assert.equal(result.proxy, target === "codex" ? config.proxy : null);
+    const overridden = await managePackage({ ...options, config, action, dryRun: true, proxy: "http://explicit:7890" }, runtime);
+    assert.equal(overridden.proxy, "http://explicit:7890");
+  }
+});
+
+test("npm metadata without engines may return only a JSON version string", async (t) => {
+  const { runtime, options } = await fixture(t, "dsh");
+  const run = runtime.runNpm;
+  runtime.runNpm = async (args) => args[0] === "view" ? '"2.0.0"' : run(args);
+  assert.equal((await managePackage({ ...options, action: "install" }, runtime)).status, "installed");
 });

@@ -1,11 +1,11 @@
 {
   "name": "ai-agent-helper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
-  "description": "Discover AI agent CLIs, manage TOML configuration, and install or update Codex through a proxy.",
+  "description": "Discover AI agent CLIs, manage TOML configuration, and install or update agents with per-agent proxy settings.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tool-helper/ai-agent-helper.git"
@@ -16,7 +16,8 @@
   },
   "type": "module",
   "bin": {
-    "agent-helper": "dist/cli.js"
+    "agent-helper": "dist/cli.js",
+    "ai-agent-helper": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -49,10 +50,13 @@
     "cli",
     "claude",
     "codex",
+    "dsh",
+    "deepseek",
     "gemini",
     "typescript"
   ],
   "dependencies": {
+    "@clack/prompts": "^1.9.0",
     "cross-spawn": "^7.0.6",
     "semver": "^7.8.6",
     "smol-toml": "^1.9.1",

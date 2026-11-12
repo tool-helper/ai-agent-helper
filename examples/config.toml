@@ -4,7 +4,8 @@
 # 配置文件格式版本，由 helper 管理。
 version = 1
 
-# 安装 agent 时的默认 HTTP/HTTPS 代理。
+# 需要代理的 agent 的默认 HTTP/HTTPS 代理，目前供 Codex 使用。
+# DSH 和工具自身默认沿用 npm/终端设置；--proxy 可临时覆盖。
 # 取消注释前请替换为自己的代理地址；省略时继承安装工具原有设置。
 # proxy = "http://127.0.0.1:7890"
 

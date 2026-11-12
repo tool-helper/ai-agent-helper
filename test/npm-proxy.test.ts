@@ -3,13 +3,17 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { managePackage, npmRegistry } from "../src/installation/manage.js";
 import { npmRunner } from "../src/installation/process.js";
 import { installationEnvironment } from "../src/proxy/environment.js";
 
-test("real npm installs and updates an isolated fixture through a local proxy", { timeout: 60_000 }, async (t) => {
+for (const target of [
+  { id: "codex", packageName: "@openai/codex", entryPoint: "bin/codex.js" },
+  { id: "dsh", packageName: "@deepseek-ai/dsh", entryPoint: "lib/bin.js" },
+]) {
+test(`real npm installs and updates an isolated ${target.id} fixture through a local proxy`, { timeout: 60_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), "agent-helper-proxy-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const prefix = join(root, "global");
@@ -22,9 +26,9 @@ test("real npm installs and updates an isolated fixture through a local proxy", 
   const artifacts = new Map<string, Buffer>();
   for (const version of ["2.0.0", "3.0.0"]) {
     const directory = join(root, version);
-    await mkdir(join(directory, "bin"), { recursive: true });
-    await writeFile(join(directory, "package.json"), JSON.stringify({ name: "@openai/codex", version, bin: { codex: "bin/codex.js" } }));
-    await writeFile(join(directory, "bin", "codex.js"), '#!/usr/bin/env node\nconsole.log("isolated test fixture");\n');
+    await mkdir(dirname(join(directory, target.entryPoint)), { recursive: true });
+    await writeFile(join(directory, "package.json"), JSON.stringify({ name: target.packageName, version, bin: { [target.id]: target.entryPoint } }));
+    await writeFile(join(directory, target.entryPoint), '#!/usr/bin/env node\nconsole.log("isolated test fixture");\n');
     const response = JSON.parse(await pack(["pack", directory, "--pack-destination", root, "--ignore-scripts", "--json"]));
     artifacts.set(version, await readFile(join(root, response[0].filename)));
   }
@@ -37,13 +41,13 @@ test("real npm installs and updates an isolated fixture through a local proxy", 
     const url = new URL(request.url!);
     if (url.hostname === "registry.agent-helper.invalid") {
       const versions = Object.fromEntries([...artifacts].map(([version, bytes]) => [version, {
-        name: "@openai/codex", version, bin: { codex: "bin/codex.js" },
-        dist: { tarball: `http://tarballs.agent-helper.invalid/codex-${version}.tgz`, integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}` },
+        name: target.packageName, version, bin: { [target.id]: target.entryPoint },
+        dist: { tarball: `http://tarballs.agent-helper.invalid/agent-${version}.tgz`, integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}` },
       }]));
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ name: "@openai/codex", "dist-tags": { latest }, versions }));
+      response.end(JSON.stringify({ name: target.packageName, "dist-tags": { latest }, versions }));
     } else if (url.hostname === "tarballs.agent-helper.invalid") {
-      const version = url.pathname.match(/codex-(.*)\.tgz/)?.[1];
+      const version = url.pathname.match(/agent-(.*)\.tgz/)?.[1];
       const bytes = artifacts.get(version ?? "");
       response.writeHead(bytes ? 200 : 404, { "content-type": "application/octet-stream" });
       response.end(bytes);
@@ -65,16 +69,18 @@ test("real npm installs and updates an isolated fixture through a local proxy", 
       return run(localArgs, stream);
     },
   };
-  const installed = await managePackage({ target: "codex", action: "install", config }, runtime);
+  const proxyOverride = target.id === "dsh" ? { proxy: config.proxy } : {};
+  const installed = await managePackage({ target: target.id, action: "install", config, ...proxyOverride }, runtime);
   assert.equal(installed.status, "installed");
   assert.equal(installed.to, "2.0.0");
   latest = "3.0.0";
-  const updated = await managePackage({ target: "codex", action: "update", config }, runtime);
+  const updated = await managePackage({ target: target.id, action: "update", config, ...proxyOverride }, runtime);
   assert.equal(updated.status, "updated");
   assert.equal(updated.from, "2.0.0");
   assert.equal(updated.to, "3.0.0");
   assert.ok(requests.some((url) => url.includes("registry.agent-helper.invalid")));
-  assert.ok(requests.some((url) => url.includes("codex-2.0.0.tgz")));
-  assert.ok(requests.some((url) => url.includes("codex-3.0.0.tgz")));
+  assert.ok(requests.some((url) => url.includes("agent-2.0.0.tgz")));
+  assert.ok(requests.some((url) => url.includes("agent-3.0.0.tgz")));
   assert.ok(auth.every((header) => header === `Basic ${Buffer.from("test-user:test-secret").toString("base64")}`));
 });
+}

@@ -35,12 +35,12 @@ test("each provider detects only its own command; list filters absent agents", a
   }
 });
 
-test("missing PATH returns no installed agents; --all equivalent includes six absent entries", async (t) => {
+test("missing PATH returns no installed agents; --all includes seven absent entries", async (t) => {
   const { context } = await fixture(t);
   context.env = {};
   assert.deepEqual(await listAgents(context), []);
   const result = await listAgents({ ...context, includeMissing: true });
-  assert.equal(result.length, 6);
+  assert.equal(result.length, 7);
   assert.ok(result.every((agent) => !agent.installed && agent.path === null));
   assert.deepEqual(agentListSchema.parse(result), result);
 });

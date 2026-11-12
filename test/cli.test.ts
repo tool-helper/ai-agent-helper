@@ -41,7 +41,7 @@ test("JSON is a clean array, including an empty installation list", () => {
   const all = run("list", "--all", "--json");
   assert.equal(all.status, 0, all.stderr);
   const parsed = agentListSchema.parse(JSON.parse(all.stdout));
-  assert.equal(parsed.length, 6);
+  assert.equal(parsed.length, 7);
   assert.ok(parsed.every((agent) => !agent.installed));
   assert.equal(all.stderr, "");
 });
@@ -59,6 +59,39 @@ test("invalid commands and flags fail without contaminating stdout", () => {
     assert.equal(result.status, 1);
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /agent-helper:/);
+  }
+});
+
+test("bare install in a non-interactive environment explains how to specify a target", () => {
+  const result = run("install", "--dry-run");
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /非交互环境.*install codex.*install dsh/);
+  const help = run("install", "--help");
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /install \[agent\]/);
+  assert.match(help.stdout, /选择菜单/);
+});
+
+test("desktop install prints official pages without requiring npm or a valid config", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "agent-helper-desktop-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await mkdir(join(home, ".ai-agent-helper"));
+  await writeFile(join(home, ".ai-agent-helper", "config.toml"), "invalid TOML = [");
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !["PATH", "HOME", "USERPROFILE"].includes(key.toUpperCase())));
+  Object.assign(env, { PATH: "", HOME: home, USERPROFILE: home });
+  for (const [id, url] of [
+    ["dsh-desktop", "https://www.deepseek.com/download/"],
+    ["chatgpt-desktop", "https://learn.chatgpt.com/docs/app"],
+  ] as const) {
+    for (const flags of [[], ["--dry-run"]]) {
+      const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", "install", id, ...flags], { cwd: root, env, encoding: "utf8", timeout: 15_000 });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /官方安装页面/);
+      assert.ok(result.stdout.includes(url));
+      assert.doesNotMatch(result.stdout, /npm|installed|updated|planned/);
+      assert.equal(result.stderr, "");
+    }
   }
 });
 

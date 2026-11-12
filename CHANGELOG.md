@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- `install` 支持省略 agent，使用 `@clack/prompts` 提供方向键选择、回车确认的 Codex / DSH 菜单；保留显式指定 agent 的用法。
+- 新增 `ai-agent-helper` 命令别名，与 `agent-helper` 使用同一入口。
+- 安装菜单新增 DSH 桌面版、ChatGPT 桌面版；支持 `install dsh-desktop` / `install chatgpt-desktop`，仅显示官方安装页面。
+- 新增 DeepSeek Harness（`dsh`）PATH 检测及官方 npm 包 `@deepseek-ai/dsh` 的安装、更新支持。
+- 区分 npm CLI 与桌面版提供的命令，保留原安装来源检查。
+- 根据安装器注册信息生成安装/更新支持范围，批量更新逐项执行并汇总失败。
+- 安装前检查目标版本的 Node.js 要求，避免在不兼容的环境中报告安装成功。
+- 按 agent 应用默认代理：Codex 使用保存的代理，DSH 和工具自身默认沿用 npm/终端设置，`--proxy` 可覆盖。
+
 ## 0.2.0
 
 - 实现 `config`、`config set key=value`、`config unset`，使用用户级 TOML 文件，保留注释并校验整份配置。
