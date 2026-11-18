@@ -2,7 +2,7 @@
 
 使用 TypeScript 和 Zod 开发的 AI agent CLI 管理工具。检测本机 PATH 中的 agent，管理 TOML 配置，安装或更新 Codex、DeepSeek Harness CLI，也支持更新工具自身。
 
-从 `0.2.0` 起提供 `config`、`install`、`update` 命令。`0.3.0` 新增方向键安装菜单、DSH CLI 支持、桌面版安装页面及按 agent 区分的默认代理规则。
+主要入口为 `agent-helper <目标> [操作]`。已发布的 `install <目标>` 和 `update --agent <目标>` 继续可用。
 
 需要 Node.js **22.13 或更高版本**。
 
@@ -42,17 +42,22 @@ agent-helper config
 agent-helper config set proxy=http://127.0.0.1:7890
 agent-helper config set no_proxy=localhost,127.0.0.1,::1
 agent-helper config unset proxy
+agent-helper codex --json
+agent-helper codex config
+agent-helper codex models
+agent-helper dsh
+agent-helper chatgpt-desktop update --dry-run
 agent-helper install
-agent-helper install codex --dry-run
-agent-helper install codex
-agent-helper install dsh --dry-run
-agent-helper install dsh
-agent-helper install dsh-desktop
-agent-helper install chatgpt-desktop
+agent-helper codex install --dry-run
+agent-helper codex install
+agent-helper dsh install --dry-run
+agent-helper dsh install
+agent-helper dsh-desktop install
+agent-helper chatgpt-desktop install
 agent-helper update --dry-run
 agent-helper update --self
-agent-helper update --agent codex
-agent-helper update --agent dsh
+agent-helper codex update
+agent-helper dsh update
 agent-helper update --all-agents
 ```
 
@@ -106,6 +111,15 @@ agentListSchema.parse(all);
 
 包提供 ESM 导出和类型声明。Zod 校验 CLI 选项及检测结果，并约束已检测到条目必须包含路径、未检测到条目的路径必须为 `null`。
 
+## Codex 诊断与桌面更新
+
+- `agent-helper codex` 显示终端 CLI、Windows ChatGPT Desktop 应用包和内置 Codex 的版本，支持 `--json`。
+- `agent-helper codex config` 在 `CODEX_HOME`（默认 `~/.codex`）中选择 `config.toml` 或 `*.config.toml`，显示提供商、`requires_openai_auth`、登录与系统代理设置，以及模型列表。备用文件缺省的限制会从同目录的主配置逐项读取。
+- `agent-helper codex models` 读取主配置，展示当前模型、模型列表与来源（提供商接口、CLI 目录或指定的本地文件）。
+- `agent-helper codex update` 使用显式或已保存的代理运行 `codex update`。缺少可连接的代理时提示输入，取消即退出。批量更新可通过 `--proxy` 或保存的配置提供代理。
+- `agent-helper chatgpt-desktop update` 使用 Windows WinGet 的 Microsoft Store 精确包 ID，默认先试直连，失败后再使用代理。以上更新都支持 `--dry-run`。
+- 新输入的更新代理保存到 helper 的 TOML。helper 尚未设置代理时，可复用原 `check-codex/update-proxy.json` 中的地址，并在连接成功后迁入。`--proxy` 只作用于本次命令。
+
 ## 配置与代理
 
 配置文件为 `~/.ai-agent-helper/config.toml`，采用 TOML。`config` 查看配置与默认值；`config set key=value` 可以一次设置多项，只按首个等号分割。修改保留注释、字段顺序和换行风格，写入前校验整份配置，失败不覆盖文件。
@@ -118,7 +132,7 @@ no_proxy = ["localhost", "127.0.0.1", "::1"]
 
 可写项为 `proxy` 和 `no_proxy`；版本字段由工具维护。CLI 中的 `no_proxy` 使用逗号分隔，保存后为 TOML 数组。删除字段使用 `config unset`，空字符串不会当成删除。`config` 展示代理时隐藏账号和密码；文件仍保存实际配置值。
 
-代理按 agent 选择：Codex 默认使用配置文件中的 `proxy`，DSH 和工具自身默认沿用 npm/终端原有网络设置。`--proxy` 可为任意受支持的目标临时指定代理。未选择 helper 代理时，保留 npm 及终端已有的代理设置。
+代理按 agent 选择：Codex 默认使用配置文件中的 `proxy`，DSH 和工具自身默认沿用 npm/终端原有网络设置。`--proxy` 可为任意受支持的目标临时指定代理。npm 安装和 DSH 更新在未选择 helper 代理时沿用终端设置。
 
 工具不通过 IP 自动判断国内或国外；需要代理时由用户配置 `proxy`。后续接入 Claude Code、OpenClaw 安装器时，也采用默认使用保存代理的策略；它们目前尚未接入安装/更新。代理及绕过规则只注入本次子进程，不修改系统代理或全局 npm 配置。
 
@@ -132,15 +146,15 @@ no_proxy = ["localhost", "127.0.0.1", "::1"]
 - `update` 默认等同于 `update --self`，更新 npm 包 `ai-agent-helper`。
 - `update --agent codex` / `update --agent dsh` 更新单个 CLI；`update --all-agents` 逐个更新 PATH 中已检测到且当前支持的 CLI，某项失败后继续其余项，最后汇总并返回非零退出码。
 - `--self`、`--agent`、`--all-agents` 互斥。其他 agent 保留检测功能，暂不支持安装/更新。
-- 安装/更新通过 npm 官方 registry 查询 `latest`，然后安装查询到的确切版本，保留当前 npm 的全局 prefix；更新不会自动降级。
-- 仅管理当前 npm 全局目录中的普通安装。遇到源码、`npm link`、临时 `npx`、其他 prefix 或其他渠道的安装时，实际更新会报错并提示原安装方式，防止写入另一个位置。
+- npm 安装和 DSH、helper 自身更新通过 npm 官方 registry 查询 `latest`，然后安装查询到的确切版本，保留当前 npm 的全局 prefix；更新不会自动降级。
+- npm 安装器仅管理当前 npm 全局目录中的普通安装。遇到源码、`npm link`、临时 `npx`、其他 prefix 或其他渠道的安装时，实际更新会报错并提示原安装方式，防止写入另一个位置。
 - `--dry-run` 仅检查本地 npm 目录、已有版本和安装来源，展示计划；不联网查询版本，不执行安装。对于不适用的安装来源会展示原因。
 - 实际安装前查询目标版本的 `engines.node` 并检查当前 Node.js；同时启用 npm 的 `--engine-strict` 校验依赖运行要求。DSH CLI 当前要求 Node.js ≥24.9.0；helper 自身仍支持 Node.js ≥22.13.0。
 - 安装完成后验证包版本和命令入口，不启动 agent、不测试登录。首次安装如果命令目录尚未在 PATH 中，会提示检查 PATH 并重新打开终端。
 
 DSH 支持的是 [DeepSeek Harness 官方 npm CLI](https://github.com/deepseek-ai/deepseek-harness#run-from-npm)，包名为 `@deepseek-ai/dsh`，CLI 可通过 `dsh web` 启动 Web 界面。它与桌面版是不同安装来源；`list` 能检测 PATH 中桌面版提供的 `dsh` 命令，但 helper 只更新当前 npm 全局目录中的 CLI。如果 PATH 命中桌面版入口，安装会跳过，更新/强制重装会提示使用原安装方式，避免覆盖桌面版或产生重复安装。
 
-Codex 的 npm 安装/更新方式见 [OpenAI 官方 CLI 文档](https://developers.openai.com/codex/cli#npm)。
+Codex 的 npm 安装方式见 [OpenAI 官方 CLI 文档](https://developers.openai.com/codex/cli#npm)。
 
 ## 开发与扩展
 

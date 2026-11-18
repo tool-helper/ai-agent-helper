@@ -13,9 +13,19 @@ import type { AgentResult } from "./schema.js";
 
 const supportedAgents = installableAgentIds.join("、");
 const supportedInstallTargets = installTargetIds.join("、");
+const targetHelp: Record<string, string> = {
+  codex: "agent-helper codex [--json] | codex config | codex models | codex install | codex update",
+  dsh: "agent-helper dsh [--json] | dsh install | dsh update",
+  "chatgpt-desktop": "agent-helper chatgpt-desktop install | chatgpt-desktop update",
+  "dsh-desktop": "agent-helper dsh-desktop install",
+};
 const help = `agent-helper — 管理本地 AI agent CLI
 
 用法：
+  agent-helper codex [config | models | install | update]
+  agent-helper dsh [install | update]
+  agent-helper dsh-desktop install
+  agent-helper chatgpt-desktop [install | update]
   agent-helper list [--all] [--json]
   agent-helper config [set <key=value> ... | unset <key>]
   agent-helper install [agent] [--proxy <url>] [--dry-run] [--reinstall]
@@ -30,7 +40,7 @@ const help = `agent-helper — 管理本地 AI agent CLI
 
 选项：
   -a, --all        同时显示未检测到的 agent（仅用于 list）
-      --json       输出 JSON 数组（仅用于 list）
+      --json       输出 JSON（list、codex 或 dsh 概况）
   -h, --help       显示帮助，支持 list --help
   -v, --version    显示 agent-helper 版本
       --self       更新工具自身（update 的默认目标）
@@ -49,16 +59,16 @@ const help = `agent-helper — 管理本地 AI agent CLI
   agent-helper config set no_proxy=localhost,127.0.0.1,::1
   agent-helper config unset proxy
   agent-helper install
-  agent-helper install codex
-  agent-helper install dsh
-  agent-helper install dsh-desktop
-  agent-helper install chatgpt-desktop
+  agent-helper codex install
+  agent-helper dsh install
+  agent-helper dsh-desktop install
+  agent-helper chatgpt-desktop install
   agent-helper update
-  agent-helper update --agent codex
-  agent-helper update --agent dsh
+  agent-helper codex update
+  agent-helper dsh update
 
 检测范围：Claude Code、Codex、Gemini CLI、OpenCode、Aider、GitHub Copilot、DeepSeek Harness。
-list 只查找 PATH 中的入口；安装/更新支持 ${supportedAgents} 的 npm CLI 和 npm 全局安装的工具自身。
+list 检查 PATH；Codex 通过原生命令更新，DSH 和 helper 自身通过 npm 更新。
 默认代理：Codex 使用保存的 proxy；DSH 和工具自身沿用 npm/终端原有设置。
 配置文件：~/.ai-agent-helper/config.toml；配置只作用于安装/更新子进程。`;
 
@@ -86,9 +96,9 @@ Codex 默认使用 config 中的 proxy；DSH 默认不套用 helper 的代理。
   update: `用法：agent-helper update [--self | --agent <agent> | --all-agents] [--proxy <url>] [--dry-run]
 不指定目标时等同于 --self；三个目标参数互斥。
 --agent 支持 ${supportedAgents}；--all-agents 逐个更新已检测到且支持的 agent，失败后继续并汇总。
-只支持普通 npm 全局安装；源码、npm link、npx 或其他安装渠道请通过原方式更新。
-Codex 默认使用保存的代理；DSH 和工具自身默认沿用 npm 原有网络设置，--proxy 可覆盖。
---dry-run 不联网、不安装；实际更新先查询 latest，再安装该具体版本。
+工具自身和 DSH 的更新要求普通 npm 全局安装。
+Codex 更新通过代理执行 codex update；DSH 和工具自身默认沿用 npm 原有网络设置，--proxy 可覆盖。
+--dry-run 不联网、不安装；npm 更新先查询 latest，再安装该具体版本。
 示例：agent-helper update --agent dsh --dry-run`,
 };
 
@@ -128,7 +138,39 @@ async function main(): Promise<void> {
     allowPositionals: true,
     strict: true,
   });
-  const command = positionals[0];
+  let command = positionals[0];
+  if (command && Object.hasOwn(targetHelp, command)) {
+    const id = command;
+    const action = positionals[1];
+    if (values.help) { console.log(targetHelp[id]); return; }
+    if (positionals.length > 2) throw new Error(targetHelp[id]!);
+    const inspection = id === "codex" && (action === undefined || action === "config" || action === "models");
+    if (inspection || (id === "dsh" && action === undefined)) {
+      if (Object.keys(values).some(key => key !== "json" || action !== undefined)) throw new Error(targetHelp[id]!);
+      if (id === "codex") {
+        const { inspectCodex } = await import("./codex/inspect.js");
+        await inspectCodex(action, Boolean(values.json));
+      } else {
+        const agents = (await listAgents({ includeMissing: true })).filter(agent => agent.id === id);
+        if (values.json) console.log(JSON.stringify(agents[0], null, 2));
+        else printTable(agents);
+      }
+      return;
+    }
+    if (action === "install") {
+      positionals.splice(0, 2, "install", id);
+    } else if (action === "update" && id !== "dsh-desktop") {
+      if (Object.keys(values).some(key => !["proxy", "dry-run"].includes(key))) throw new Error(targetHelp[id]!);
+      if (id === "chatgpt-desktop") {
+        const { update } = await import("./codex/update.js");
+        await update(id, { config: await readConfig(), proxy: values.proxy, dryRun: values["dry-run"] });
+        return;
+      }
+      positionals.splice(0, 2, "update");
+      values.agent = id;
+    } else throw new Error(targetHelp[id]!);
+    command = action;
+  }
   if (command !== undefined && !["list", "config", "install", "update"].includes(command)) {
     throw new Error("未知命令。使用 agent-helper --help 查看帮助。");
   }
@@ -191,6 +233,14 @@ async function main(): Promise<void> {
     ...(values.agent === undefined ? {} : { agent: values.agent }),
     ...(values["all-agents"] === undefined ? {} : { allAgents: values["all-agents"] }),
   });
+  async function updateOne(id: string): Promise<void> {
+    if (id === "codex") {
+      const { update } = await import("./codex/update.js");
+      await update(id, { ...common, proxy: values.proxy, interactive: target.kind !== "all-agents" });
+    } else {
+      printResult(await managePackage({ ...common, target: id, action: "update" }));
+    }
+  }
   if (target.kind === "all-agents") {
     let detected = 0;
     let failed = 0;
@@ -199,7 +249,7 @@ async function main(): Promise<void> {
         const installed = await provider.detect({ env: process.env, platform: process.platform, cwd: process.cwd() });
         if (!installed) continue;
         detected++;
-        printResult(await managePackage({ ...common, target: provider.definition.id, action: "update" }));
+        await updateOne(provider.definition.id);
       } catch (error) {
         failed++;
         console.error(`${provider.definition.id}: ${redact(error instanceof Error ? error.message : String(error))}`);
@@ -209,7 +259,7 @@ async function main(): Promise<void> {
     if (failed) process.exitCode = 1;
     return;
   }
-  printResult(await managePackage({ ...common, target: target.kind === "self" ? "self" : target.id, action: "update" }));
+  await updateOne(target.kind === "self" ? "self" : target.id);
 }
 
 main().catch((error: unknown) => {

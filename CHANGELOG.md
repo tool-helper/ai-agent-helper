@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- 新增目标优先的 CLI 入口，支持 Codex、DSH CLI 和两个桌面安装入口，兼容原有命令。
+- 合入 Codex 版本、配置继承、登录限制、模型列表及目录来源检查。
+- Codex 更新统一使用临时代理运行 `codex update`，支持单次覆盖和旧代理地址迁移。
+- ChatGPT Desktop 支持通过 WinGet 精确更新已安装的 Windows 应用包。
+
 ## 0.3.0
 
 - `install` 支持省略 agent，使用 `@clack/prompts` 提供方向键选择、回车确认的 Codex / DSH 菜单；保留显式指定 agent 的用法。

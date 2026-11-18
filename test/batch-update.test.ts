@@ -40,7 +40,6 @@ if (args[0] === 'root') console.log(${JSON.stringify(npmRoot)});
 else if (args[0] === 'prefix') console.log(${JSON.stringify(prefix)});
 else if (args[0] === 'view') console.log(JSON.stringify({ version: '2.0.0', engines: { node: '>=22.13.0' } }));
 else if (args[0] === 'install') {
-  if (args.includes('@openai/codex@2.0.0')) { console.error('intentional Codex failure'); process.exit(17); }
   if (!args.includes('@deepseek-ai/dsh@2.0.0')) process.exit(18);
   fs.writeFileSync(path.join(${JSON.stringify(npmRoot)}, '@deepseek-ai/dsh/package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '2.0.0' }));
 } else process.exit(19);
@@ -57,10 +56,10 @@ else if (args[0] === 'install') {
   const projectRoot = fileURLToPath(new URL("../", import.meta.url));
   const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", "update", "--all-agents"], { cwd: projectRoot, env, encoding: "utf8", timeout: 20_000 });
   assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /intentional Codex failure/);
+  assert.match(result.stderr, /codex: .*代理/);
   assert.match(result.stdout, /dsh: updated/);
   assert.match(result.stdout, /失败 1 个/);
   const calls = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { args: string[]; proxy: string | null });
-  assert.equal(calls.find((call) => call.args.includes("@openai/codex@2.0.0"))?.proxy, "http://saved-proxy.invalid:7890");
+  assert.ok(calls.every(call => call.args.every(argument => !argument.includes("@openai/codex"))));
   assert.equal(calls.find((call) => call.args.includes("@deepseek-ai/dsh@2.0.0"))?.proxy, null);
 });
