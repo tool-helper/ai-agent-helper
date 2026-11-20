@@ -23,9 +23,9 @@ test("batch update continues after failure and applies default proxy only to eli
     const directory = join(npmRoot, ...packageName!.split("/"));
     await mkdir(dirname(join(directory, entry!)), { recursive: true });
     await writeFile(join(directory, "package.json"), JSON.stringify({ name: packageName, version: "1.0.0" }));
-    await writeFile(join(directory, entry!), "");
+    await writeFile(join(directory, entry!), name === "codex" ? "#!/bin/sh\necho codex-cli 1.0.0\n" : "");
     const shim = join(bin, name! + (process.platform === "win32" ? ".cmd" : ""));
-    if (process.platform === "win32") await writeFile(shim, "@exit /b 0\r\n");
+    if (process.platform === "win32") await writeFile(shim, name === "codex" ? "@echo codex-cli 1.0.0\r\n" : "@exit /b 0\r\n");
     else {
       await chmod(join(directory, entry!), 0o755);
       await symlink(join(directory, entry!), shim);

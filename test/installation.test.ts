@@ -96,6 +96,34 @@ test("up-to-date packages never install or downgrade", async (t) => {
   assert.ok(!calls.some((args) => args[0] === "install"));
 });
 
+test("DSH and helper compare matching versions and skip without invoking the installer", async t => {
+  for (const target of ["dsh", "self"]) {
+    const { calls, runtime, options } = await fixture(t, target, "2.0.0");
+    const result = await managePackage(options, runtime);
+    assert.equal(result.status, "skipped");
+    assert.equal(result.from, "2.0.0");
+    assert.equal(result.to, "2.0.0");
+    assert.match(result.message, /版本一致/);
+    assert.ok(calls.some(args => args[0] === "view"));
+    assert.ok(!calls.some(args => args[0] === "install"));
+  }
+});
+
+test("npm update reports current and server versions before modifying the package", async t => {
+  const { runtime, options } = await fixture(t, "dsh", "1.0.0");
+  const messages: string[] = [];
+  t.mock.method(console, "log", (line: string) => messages.push(line));
+  const run = runtime.runNpm;
+  runtime.runNpm = async (args, stream) => {
+    if (args[0] === "install") {
+      assert.ok(messages.some(line => line.includes("当前版本：1.0.0")));
+      assert.ok(messages.some(line => line.includes("服务端版本：2.0.0")));
+    }
+    return run(args, stream);
+  };
+  assert.equal((await managePackage(options, runtime)).status, "updated");
+});
+
 test("self updates require this running package to be installed in the selected global prefix", async (t) => {
   const normal = await fixture(t, "self", "1.0.0");
   assert.equal((await managePackage(normal.options, normal.runtime)).status, "updated");

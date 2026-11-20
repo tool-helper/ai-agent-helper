@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- 修复 ChatGPT Desktop 默认更新传入 `--no-proxy` 导致 WinGet 要求管理员启用 `ProxyCommandLineOptions`；未指定代理时改用 WinGet 默认网络设置。
+- 所有实际更新先显示并比较当前版本与官方服务端版本；版本相同提示并跳过，本地更高时不降级，版本未知或查询失败时停止更新。
+- Codex 新增官方稳定发布检查；ChatGPT Desktop 从 Microsoft Store 产品目录读取适用应用包的四段版本，避免将 `Unknown` 误判为最新版。
+
 ## 0.4.0
 
 - 新增目标优先的 CLI 入口，支持 Codex、DSH CLI 和两个桌面安装入口，兼容原有命令。

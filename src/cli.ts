@@ -38,6 +38,8 @@ const help = `agent-helper — 管理本地 AI agent CLI
   install [agent]  安装 CLI 或显示桌面版安装页面，省略 agent 时交互选择
   update           默认更新工具自身；--agent 指定 agent
 
+实际更新前先显示当前版本与服务端版本，版本一致时提示并跳过。
+
 选项：
   -a, --all        同时显示未检测到的 agent（仅用于 list）
       --json       输出 JSON（list、codex 或 dsh 概况）
@@ -97,6 +99,7 @@ Codex 默认使用 config 中的 proxy；DSH 默认不套用 helper 的代理。
 不指定目标时等同于 --self；三个目标参数互斥。
 --agent 支持 ${supportedAgents}；--all-agents 逐个更新已检测到且支持的 agent，失败后继续并汇总。
 工具自身和 DSH 的更新要求普通 npm 全局安装。
+实际更新先比较当前版本与官方服务端版本；相同则提示并跳过，本地更高时不降级，版本无法确认则停止。
 Codex 更新通过代理执行 codex update；DSH 和工具自身默认沿用 npm 原有网络设置，--proxy 可覆盖。
 --dry-run 不联网、不安装；npm 更新先查询 latest，再安装该具体版本。
 示例：agent-helper update --agent dsh --dry-run`,

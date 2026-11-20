@@ -2,7 +2,9 @@ import { spawn } from 'node:child_process';
 import { writeConfig, configPath } from '../config/store.js';
 import { proxyUrlSchema } from '../config/schema.js';
 import { installationEnvironment, redact } from '../proxy/environment.js';
-import { findCli, powershell } from './inspect.js';
+import { findCli, inspectCodexVersion, powershell } from './inspect.js';
+import { checkUpdateVersions } from '../updates/versions.js';
+import { codexReleaseUrl, codexReleaseVersion, desktopCatalogUrl, desktopReleaseVersion, readUpdateJson } from '../updates/sources.js';
 import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import os from 'node:os';
@@ -77,11 +79,16 @@ function probeHttps(url, env) {
     '--max-time', '10', '--output', windows ? 'NUL' : '/dev/null', url], env, true);
 }
 
-export async function updateTarget(name, findCli, powershell) {
+export async function updateTarget(name, findCli, powershell, readJson = readUpdateJson) {
   if (name === 'codex') {
     const { path: file } = await findCli();
     if (!file) throw new Error('未找到 PATH 上的 Codex CLI。');
+    const cli = await inspectCodexVersion({ status: 'found', path: file });
+    if (!cli.version) throw new Error('无法识别 Codex CLI 当前版本，未执行更新。');
     return {
+      version: cli.version,
+      versionFormat: 'semver',
+      latest: async env => codexReleaseVersion(await readJson(codexReleaseUrl, env)),
       run(env) {
         if (windows && /\.(cmd|bat)$/i.test(file)) {
           return execute(shellPath(), ['-NoProfile', '-Command', '& $env:CHECK_CODEX_LAUNCHER update; exit $LASTEXITCODE'],
@@ -97,17 +104,27 @@ export async function updateTarget(name, findCli, powershell) {
     $app = Get-AppxPackage -Name OpenAI.Codex
     if (!$app) { Write-Output 'APP_MISSING'; exit 0 }
     $cmd = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { $cmd.Source } else {
+    $winget = if ($cmd) { $cmd.Source } else {
       $installer = Get-AppxPackage -Name Microsoft.DesktopAppInstaller
       if ($installer) { Join-Path $installer.InstallLocation 'winget.exe' }
-    }`);
-  const winget = stdout.trim();
-  if (winget === 'APP_MISSING') throw new Error('未找到已安装的 ChatGPT Desktop（OpenAI.Codex）。');
-  if (!winget) throw new Error('未找到 WinGet，请安装 Windows 应用安装程序。');
+    }
+    [pscustomobject]@{ Winget=$winget; Version=[string]$app.Version; Architecture=[string]$app.Architecture } | ConvertTo-Json -Compress`);
+  if (stdout.trim() === 'APP_MISSING') throw new Error('未找到已安装的 ChatGPT Desktop（OpenAI.Codex）。');
+  let installed;
+  try { installed = JSON.parse(stdout); }
+  catch { throw new Error('无法读取 ChatGPT Desktop 当前版本和安装信息，未执行更新。'); }
+  const winget = installed.Winget;
+  if (typeof winget !== 'string' || !winget) throw new Error('未找到 WinGet，请安装 Windows 应用安装程序。');
+  if (typeof installed.Version !== 'string' || !/^\d+\.\d+\.\d+\.\d+$/.test(installed.Version) || typeof installed.Architecture !== 'string') throw new Error('无法识别 ChatGPT Desktop 当前版本和架构，未执行更新。');
   return {
-    probe: env => probeHttps(`https://storeedgefd.dsx.mp.microsoft.com/v9.0/packageManifests/${storeId}?Market=US`, env),
+    version: installed.Version,
+    versionFormat: 'windows',
+    latest: async env => desktopReleaseVersion(await readJson(desktopCatalogUrl, env), installed.Architecture, os.release().split('.').concat('0').slice(0, 4).join('.')),
+    probe: env => probeHttps(desktopCatalogUrl, env),
     async run(env, proxy) {
-      const args = ['upgrade', '--id', storeId, '--exact', '--source', 'msstore', ...(proxy ? ['--proxy', proxy] : ['--no-proxy'])];
+      // Both --proxy and --no-proxy require the ProxyCommandLineOptions admin setting.
+      // Leave WinGet's network defaults intact when no proxy was requested.
+      const args = ['upgrade', '--id', storeId, '--exact', '--source', 'msstore', ...(proxy ? ['--proxy', proxy] : [])];
       const code = await execute(winget, args, env);
       if ((code >>> 0) === 0x8a15002b) {
         console.log('当前没有可用的 ChatGPT 更新。');
@@ -150,8 +167,12 @@ async function requireProxy(check, config, override, interactive = true) {
   throw new Error('已取消更新。');
 }
 
-export async function update(name, { config, proxy: override, dryRun, interactive = true }) {
-  const target = await updateTarget(name, findCli, powershell);
+/**
+ * @param {string} name
+ * @param {{ config: import('../config/schema.js').Config, proxy?: string | undefined, dryRun?: boolean | undefined, interactive?: boolean | undefined }} options
+ */
+export async function update(name, { config, proxy: override, dryRun = false, interactive = true }, runtime = {}) {
+  const target = await (runtime.target ?? updateTarget)(name, findCli, powershell, runtime.readJson);
   if (override !== undefined) proxyUrlSchema.parse(override);
   if (dryRun) {
     const route = override ? redact(override) : name === 'codex' ? (config.proxy ? redact(config.proxy) : '必须提供代理') : '优先直连';
@@ -171,7 +192,6 @@ export async function update(name, { config, proxy: override, dryRun, interactiv
       proxy = await requireProxy(async address => await target.probe(updateEnv(config, address)) === 0, config);
     }
   }
-  console.log(`正在通过${proxy ? '代理' : '直连'}更新 ${name === 'codex' ? 'Codex CLI' : 'ChatGPT Desktop'}…`);
   const env = updateEnv(config, proxy);
   if (name === 'codex') {
     // An inherited NO_PROXY=* would silently bypass the required update proxy.
@@ -180,6 +200,11 @@ export async function update(name, { config, proxy: override, dryRun, interactiv
     }
     env.NO_PROXY = env.npm_config_noproxy = 'localhost,127.0.0.1,::1';
   }
+  const latest = await target.latest(env);
+  const nameLabel = name === 'codex' ? 'Codex CLI' : 'ChatGPT Desktop';
+  if (!checkUpdateVersions(nameLabel, target.version, latest, target.versionFormat).needsUpdate) return;
+  if (name !== 'codex' && !proxy) console.log('正在使用 WinGet 默认网络设置更新 ChatGPT Desktop…');
+  else console.log(`正在通过${proxy ? '代理' : '直连'}更新 ${nameLabel}…`);
   const code = await target.run(env, proxy);
   if (code !== 0) throw new Error(`更新程序退出码  ${code}`);
 }

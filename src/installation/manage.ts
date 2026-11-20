@@ -8,6 +8,7 @@ import type { Config } from "../config/schema.js";
 import type { DetectionContext } from "../detection/types.js";
 import { installationEnvironment, redact } from "../proxy/environment.js";
 import { npmRunner, type NpmRunner } from "./process.js";
+import { checkUpdateVersions } from "../updates/versions.js";
 
 export const npmRegistry = "https://registry.npmjs.org/";
 const registryArgument = `--registry=${npmRegistry}`;
@@ -121,8 +122,9 @@ export async function managePackage(options: ManageOptions, suppliedRuntime?: In
   catch { throw new Error("npm 返回的 latest 版本或运行环境信息无效。"); }
   const latest = release.version;
   const args = ["install", "--global", `${packageName}@${latest}`, "--prefix", prefix, registryArgument];
-  if (options.action === "update" && installed && semver.gte(installed.version, latest)) {
-    return { ...base, args, to: latest, status: "skipped", message: "当前版本已是最新版或更新的版本。" };
+  if (options.action === "update" && installed) {
+    const check = checkUpdateVersions(displayName, installed.version, latest);
+    if (!check.needsUpdate) return { ...base, args, to: latest, status: "skipped", message: check.message };
   }
   const requirement = release.engines?.node;
   if (requirement !== undefined && (!semver.validRange(requirement) || !semver.satisfies(runtime.nodeVersion ?? process.versions.node, requirement))) {

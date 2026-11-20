@@ -15,6 +15,19 @@ test("target commands inspect the selected config, require a proxy and migrate i
   function cli(args: string[], input = "") {
     return spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", ...args], { env, input, encoding: "utf8", timeout: 20000 });
   }
+  function nativeUpdate(proxy?: string) {
+    const script = `
+      import { update } from './src/codex/update.js';
+      import { readConfig } from './src/config/store.js';
+      try {
+        await update('codex', { config: await readConfig(), proxy: process.env.HELPER_TEST_PROXY, interactive: false },
+          { readJson: async () => ({ tag_name: 'rust-v1.2.4' }) });
+      } catch (error) { console.error(error.message); process.exitCode = 1; }
+    `;
+    return spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+      env: { ...env, HELPER_TEST_PROXY: proxy }, encoding: "utf8", timeout: 20000,
+    });
+  }
   const log = join(root, "invocations.jsonl");
   const fixture = join(root, "fixture.cjs");
   await writeFile(fixture, [
@@ -40,6 +53,7 @@ test("target commands inspect the selected config, require a proxy and migrate i
   assert.match(cli(["dsh-desktop", "install"]).stdout, /deepseek.com/);
   const saved = join(root, ".ai-agent-helper", "config.toml");
   assert.match(cli(["codex", "update", "--dry-run"]).stdout, /codex update/);
+  assert.match(cli(["update", "--agent", "codex", "--dry-run"]).stdout, /codex update/);
   assert.notEqual(cli(["codex", "update"], "\n").status, 0);
   await assert.rejects(readFile(log), { code: "ENOENT" });
   const listener = createServer(socket => socket.destroy());
@@ -48,12 +62,12 @@ test("target commands inspect the selected config, require a proxy and migrate i
   const address = listener.address();
   assert.ok(address && typeof address === "object");
   const proxy = "http://127.0.0.1:" + address.port;
-  const override = cli(["codex", "update", "--proxy", proxy]);
+  const override = nativeUpdate(proxy);
   assert.equal(override.status, 0, override.stderr);
   await assert.rejects(readFile(saved), { code: "ENOENT" });
   await mkdir(join(root, "check-codex"));
   await writeFile(join(root, "check-codex", "update-proxy.json"), JSON.stringify({ proxy }));
-  const legacy = cli(["update", "--agent", "codex"]);
+  const legacy = nativeUpdate();
   assert.equal(legacy.status, 0, legacy.stderr);
   assert.ok((await readFile(saved, "utf8")).includes(proxy));
   assert.deepEqual((await readFile(log, "utf8")).trim().split("\n").map(s => JSON.parse(s)), [proxy, proxy]);

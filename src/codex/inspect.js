@@ -32,7 +32,7 @@ async function inspectCli() {
   return inspectCodexVersion(await findCli());
 }
 
-async function inspectCodexVersion(cli) {
+export async function inspectCodexVersion(cli) {
   if (cli.status !== 'found') return cli;
   try {
     const result = await runCli(cli.path, ['--version']);
