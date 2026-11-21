@@ -3,7 +3,7 @@ import { writeConfig, configPath } from '../config/store.js';
 import { proxyUrlSchema } from '../config/schema.js';
 import { installationEnvironment, redact } from '../proxy/environment.js';
 import { findCli, inspectCodexVersion, powershell } from './inspect.js';
-import { checkUpdateVersions } from '../updates/versions.js';
+import { checkUpdateVersions, compareWindowsVersions } from '../updates/versions.js';
 import { codexReleaseUrl, codexReleaseVersion, desktopCatalogUrl, desktopReleaseVersion, readUpdateJson } from '../updates/sources.js';
 import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
@@ -121,16 +121,25 @@ export async function updateTarget(name, findCli, powershell, readJson = readUpd
     versionFormat: 'windows',
     latest: async env => desktopReleaseVersion(await readJson(desktopCatalogUrl, env), installed.Architecture, os.release().split('.').concat('0').slice(0, 4).join('.')),
     probe: env => probeHttps(desktopCatalogUrl, env),
+    async currentVersion() {
+      try {
+        const { stdout } = await powershell(`
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+          Get-AppxPackage -Name OpenAI.Codex | Select-Object @{Name='Version';Expression={[string]$_.Version}} | ConvertTo-Json -Compress`);
+        const version = JSON.parse(stdout).Version;
+        if (typeof version !== 'string') throw new Error();
+        compareWindowsVersions(version, version);
+        return version;
+      } catch {
+        throw new Error('无法核验 ChatGPT Desktop 更新后的实际版本，未确认更新完成。');
+      }
+    },
     async run(env, proxy) {
       // Both --proxy and --no-proxy require the ProxyCommandLineOptions admin setting.
       // Leave WinGet's network defaults intact when no proxy was requested.
       const args = ['upgrade', '--id', storeId, '--exact', '--source', 'msstore', ...(proxy ? ['--proxy', proxy] : [])];
-      const code = await execute(winget, args, env);
-      if ((code >>> 0) === 0x8a15002b) {
-        console.log('当前没有可用的 ChatGPT 更新。');
-        return 0;
-      }
-      return code;
+      return execute(winget, args, env);
     }
   };
 }
@@ -206,5 +215,15 @@ export async function update(name, { config, proxy: override, dryRun = false, in
   if (name !== 'codex' && !proxy) console.log('正在使用 WinGet 默认网络设置更新 ChatGPT Desktop…');
   else console.log(`正在通过${proxy ? '代理' : '直连'}更新 ${nameLabel}…`);
   const code = await target.run(env, proxy);
+  if (name === 'chatgpt-desktop' && (code === 0 || (code >>> 0) === 0x8a15002b)) {
+    const actual = await target.currentVersion();
+    console.log(`ChatGPT Desktop 实际安装版本：${actual}`);
+    if (compareWindowsVersions(actual, latest) < 0) {
+      const reason = code === 0 ? 'WinGet 已结束，但尚未确认应用更新完成。' : '公开目录已有新版本，但 WinGet 未提供可用升级。';
+      throw new Error(`${reason} 实际版本仍为 ${actual}，公开目录版本为 ${latest}。请在这台电脑的图形桌面中打开 Microsoft Store → 库 → 获取更新，核实可用版本。`);
+    }
+    console.log('ChatGPT Desktop 实际安装版本已达到服务端版本，版本验证通过。');
+    return;
+  }
   if (code !== 0) throw new Error(`更新程序退出码  ${code}`);
 }

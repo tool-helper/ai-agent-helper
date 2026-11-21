@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- ChatGPT Desktop 更新后重新核验实际应用包版本；公开目录有新版而 WinGet 未提供升级时明确报告差异，不再将该退出码直接视为成功。
+
 ## 0.4.1
 
 - 修复 ChatGPT Desktop 默认更新传入 `--no-proxy` 导致 WinGet 要求管理员启用 `ProxyCommandLineOptions`；未指定代理时改用 WinGet 默认网络设置。

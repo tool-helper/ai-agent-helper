@@ -24,6 +24,7 @@ test("native updaters compare and announce versions before updating; equal or ne
         versionFormat: name === "codex" ? "semver" : "windows",
         probe: async () => 0,
         latest: async () => { checks++; return latest; },
+        currentVersion: async () => latest,
         run: async () => {
           assert.ok(output.some(line => line.includes(`当前版本：${current}`)));
           assert.ok(output.some(line => line.includes(`服务端版本：${latest}`)));

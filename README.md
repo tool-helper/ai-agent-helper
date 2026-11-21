@@ -6,6 +6,8 @@
 
 `0.4.1` 起，所有实际更新先比较当前版本与服务端版本，相同则提示并跳过；同时修复 WinGet 默认更新触发代理参数管理员限制的问题。
 
+`0.4.2` 在 ChatGPT Desktop 更新后重新核验实际安装版本；公开目录与 WinGet 升级结果不一致时明确报错，避免误报更新完成。
+
 需要 Node.js **22.13 或更高版本**。
 
 ## 安装与使用
@@ -120,6 +122,7 @@ agentListSchema.parse(all);
 - `agent-helper codex models` 读取主配置，展示当前模型、模型列表与来源（提供商接口、CLI 目录或指定的本地文件）。
 - `agent-helper codex update` 使用显式或已保存的代理运行 `codex update`。缺少可连接的代理时提示输入，取消即退出。批量更新可通过 `--proxy` 或保存的配置提供代理。
 - `agent-helper chatgpt-desktop update` 使用 Windows WinGet 的 Microsoft Store 精确包 ID，默认先试直连，失败后再使用代理。以上更新都支持 `--dry-run`。
+- ChatGPT Desktop 的公开目录版本与 WinGet 实际提供的可升级版本可能不同。WinGet 退出后会重新读取实际应用包版本；如果仍低于查询到的目录版本，将明确提示未更新或未确认完成，并返回非零退出码。WinGet 的“找不到可用升级”不会再被当作已是最新版；可在该机器的图形桌面中通过 Microsoft Store → 库 → 获取更新核实。
 - ChatGPT Desktop 未指定代理时使用 WinGet / Windows 原有网络设置，不传 `--no-proxy`，因此不需要启用 `ProxyCommandLineOptions`。确实需要 `--proxy` 时，若 WinGet 提示此功能被禁用，可由管理员运行 `winget settings --enable ProxyCommandLineOptions` 后重试。helper 不自动更改此管理员设置。
 - 所有实际更新（Codex、DSH、ChatGPT Desktop、helper 自身及批量更新）在执行更新程序前，先显示当前版本和服务端版本。版本一致时提示并跳过；本地版本更高时保留当前版本，避免降级。版本无法识别或服务端查询失败时报错并停止更新。
 - Codex 对照 GitHub 官方最新稳定发布；DSH 和 helper 对照 npm 官方 registry 的 `latest`。ChatGPT Desktop 对照 Microsoft Store 官方产品目录中适用于本机架构和 Windows 版本的应用包版本，按四段数字比较，不使用 WinGet 清单中的 `Unknown` 判断是否最新。
